@@ -14,6 +14,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  TC_EXPOSURE: .cache/tc-exposure        # population, countries and vulnerability for the impact layer
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -35,11 +38,32 @@ jobs:
           path: ~/.local/share/cartopy
           key: natural-earth-50m
 
+      # ---- impact layer data: restored from the cache, prepared only if missing, saved only when complete
+      - name: Restore exposure data
+        id: exposure
+        uses: actions/cache/restore@v5
+        with:
+          path: .cache/tc-exposure
+          key: tc-exposure-ghsl2025-v1
+
+      - name: Prepare exposure data (first run only, about 450 MB download)
+        if: steps.exposure.outputs.cache-hit != 'true'
+        continue-on-error: true            # if this fails the site still builds, just without the Impact view
+        run: python scripts/fetch_exposure.py --out "$TC_EXPOSURE"
+
+      - name: Save exposure data
+        if: steps.exposure.outputs.cache-hit != 'true' && hashFiles('.cache/tc-exposure/countries.json') != ''
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/tc-exposure
+          key: tc-exposure-ghsl2025-v1
+
+      # ---- storms, GFS, 3D videos, diagnostics, impact layer, website
       - name: Find active storms, download GFS, render videos
         run: |
           OWNER="${{ github.repository_owner }}"; REPO="${{ github.event.repository.name }}"
           if [ "$REPO" = "$OWNER.github.io" ]; then URL="https://$OWNER.github.io"; else URL="https://$OWNER.github.io/$REPO"; fi
-          python scripts/run_daily.py --site-url "$URL" || {
+          python scripts/run_daily.py --site-url "$URL" --exposure "$TC_EXPOSURE" || {
             code=$?
             if [ -s public/data/storms.json ]; then
               echo "::warning::run_daily.py exited with code $code after the site was built; publishing anyway"
@@ -57,7 +81,8 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: public           # only the website, videos and storms.json are published
+          path: public           # only the website, videos and data files are published
+          retention-days: 1      # the package GitHub Pages deploys from; deleted automatically after a day
 
   deploy:
     needs: build
