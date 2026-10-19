@@ -46,8 +46,7 @@ jobs:
           path: .cache/tc-exposure
           key: tc-exposure-ghsl2025-v1
 
-      - name: Prepare exposure data (first run only, about 450 MB download)
-        if: steps.exposure.outputs.cache-hit != 'true'
+      - name: Prepare exposure data (big download on the first run only; World Bank table refreshed daily)
         continue-on-error: true            # if this fails the site still builds, just without the Impact view
         run: python scripts/fetch_exposure.py --out "$TC_EXPOSURE"
 
