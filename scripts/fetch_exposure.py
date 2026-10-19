@@ -19,7 +19,7 @@ import requests
 
 GHSL = ("https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/GHSL/GHS_POP_GLOBE_R2023A/"
         "GHS_POP_E2025_GLOBE_R2023A_4326_30ss/V1-0/GHS_POP_E2025_GLOBE_R2023A_4326_30ss_V1_0.zip")
-WB = "https://api.worldbank.org/v2/country/all/indicator/{code}?format=json&mrnev=1&per_page=20000"
+WB = "https://api.worldbank.org/v2/country/all/indicator/{code}?format=json&mrnev=1&per_page=100&page={page}"
 INDICATORS = {"gdppc": "NY.GDP.PCAP.PP.CD", "u5mr": "SH.DYN.MORT", "elec": "EG.ELC.ACCS.ZS"}
 NY, NX, D = 1800, 3600, 0.1
 
@@ -79,14 +79,31 @@ def countries_raster():
     return cid, meta
 
 
-def world_bank(sess):
+def world_bank(sess, tries=5):
+    """Latest non-empty value per country for each indicator, in small pages with retries.
+    Returns None if the World Bank service cannot be reached."""
+    import time
     vals = {}
     for key, code in INDICATORS.items():
-        r = sess.get(WB.format(code=code), timeout=120); r.raise_for_status()
-        rows = r.json()[1] or []
-        for row in rows:
-            iso = row.get("countryiso3code"); v = row.get("value")
-            if iso and v is not None: vals.setdefault(iso, {})[key] = float(v)
+        page, pages = 1, 1
+        while page <= pages:
+            for attempt in range(tries):
+                try:
+                    r = sess.get(WB.format(code=code, page=page), timeout=(20, 90)); r.raise_for_status()
+                    meta, rows = r.json()[0], (r.json()[1] or [])
+                    break
+                except Exception as e:
+                    wait = 10 * (attempt + 1)
+                    print(f"  World Bank {code} page {page}: {type(e).__name__}, retrying in {wait} s")
+                    time.sleep(wait)
+            else:
+                return None
+            pages = int(meta.get("pages", 1))
+            for row in rows:
+                iso = row.get("countryiso3code"); v = row.get("value")
+                if iso and v is not None: vals.setdefault(iso, {})[key] = float(v)
+            page += 1
+        print(f"  World Bank {code}: {sum(key in v for v in vals.values())} countries")
     return vals
 
 
@@ -104,23 +121,37 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=os.path.expanduser("~/.cache/tc-exposure"))
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
-    done = [os.path.join(a.out, f) for f in ("pop_0p1.npy", "country_0p1.npy", "countries.json")]
-    if all(os.path.exists(f) for f in done):
-        print("exposure data already prepared:", a.out); return
+    f_pop, f_cid, f_base, f_cty = (os.path.join(a.out, f) for f in ("pop_0p1.npy", "country_0p1.npy", "countries_base.json", "countries.json"))
     sess = requests.Session(); sess.headers["User-Agent"] = "tc3d-site/1.0"
-    pop = population(a.out, sess)
-    cid, meta = countries_raster()
+
+    # 1. the expensive, stable part: population and country grids (saved at once, never repeated)
+    if not (os.path.exists(f_pop) and os.path.exists(f_cid) and os.path.exists(f_base)):
+        pop = population(a.out, sess); np.save(f_pop, pop); del pop
+        cid, meta = countries_raster(); np.save(f_cid, cid); json.dump(meta, open(f_base, "w"))
+        for f in os.listdir(a.out):                                # keep the cache small: drop the big source files
+            if f.endswith((".zip", ".tif")): os.remove(os.path.join(a.out, f))
+        print("population and country grids saved")
+    else:
+        print("population and country grids already prepared")
+
+    # 2. the small, refreshable part: World Bank indicators -> vulnerability (tried on every run)
+    meta = json.load(open(f_base))
     wb = world_bank(sess)
+    if wb is None:
+        if os.path.exists(f_cty):
+            print("World Bank service unavailable: keeping the previous country table"); return
+        print("World Bank service unavailable: using a neutral vulnerability (0.5) until the next run")
+        wb, source = {}, "fallback"
+    else:
+        source = "worldbank"
     vs = [vulnerability(wb.get(m["iso3"], {})) for m in meta]
     known = [v for v in vs if v is not None]; fill = float(np.median(known)) if known else 0.5
     for m, v in zip(meta, vs):
         d = wb.get(m["iso3"], {})
-        m.update(gdppc=d.get("gdppc"), u5mr=d.get("u5mr"), elec=d.get("elec"), vuln=v if v is not None else fill, vuln_filled=v is None)
-    np.save(done[0], pop); np.save(done[1], cid)
-    json.dump(meta, open(done[2], "w"))
-    for f in os.listdir(a.out):                                    # keep the cache small: drop the big source files
-        if f.endswith((".zip", ".tif")): os.remove(os.path.join(a.out, f))
-    print("exposure data ready:", a.out)
+        m.update(gdppc=d.get("gdppc"), u5mr=d.get("u5mr"), elec=d.get("elec"), vuln=v if v is not None else fill,
+                 vuln_filled=v is None, source=source)
+    json.dump(meta, open(f_cty, "w"))
+    print(f"exposure data ready: {a.out} (vulnerability from {source})")
 
 
 if __name__ == "__main__":
