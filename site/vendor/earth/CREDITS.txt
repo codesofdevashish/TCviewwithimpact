@@ -1,0 +1,1 @@
+Earth textures: NASA Blue Marble and Black Marble (public domain), via the three-globe package examples.

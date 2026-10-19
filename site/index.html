@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tropical cyclones in 3D: live dashboard</title>
+<meta name="description" content="A live dashboard of every active tropical cyclone on Earth: 3D flow, track, intensity and environment, rebuilt daily from GFS analyses.">
+<meta property="og:title" content="Tropical cyclones in 3D, live dashboard">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=__BUILD__">
+</head>
+<body>
+<div id="banner" class="banner" role="alert" hidden></div>
+<div class="app" id="app">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="top">
+    <a class="brand" href="#" id="brand"><span class="swirl" aria-hidden="true"></span><span id="brand-name">Tropical cyclones</span></a>
+    <div class="search" role="search">
+      <input id="q" type="search" placeholder="Search storms, basins or years" aria-label="Search storms" autocomplete="off">
+      <kbd>Ctrl K</kbd>
+      <ul id="q-results" class="q-results" role="listbox" hidden></ul>
+    </div>
+    <span class="clock"><span class="live-dot" aria-hidden="true"></span><span id="clock">Live</span></span>
+    <nav class="menu" aria-label="More">
+      <button type="button" data-open="season">Season</button>
+      <button type="button" data-open="archive">Archive</button>
+      <button type="button" data-open="guide">Guide</button>
+      <button type="button" data-open="method">Method</button>
+      <button type="button" data-open="about">About</button>
+    </nav>
+  </header>
+
+  <!-- ============ LEFT: STORMS ============ -->
+  <aside class="side" aria-label="Storms">
+    <div class="side-head">
+      <h2 id="headline">Storms</h2>
+      <p id="status" class="muted small"></p>
+    </div>
+    <div class="filters" id="basins" role="group" aria-label="Filter by basin"></div>
+    <ol class="slist" id="active-list" aria-label="Active storms"></ol>
+    <h3 class="side-sub">Pinned</h3>
+    <ol class="slist mini" id="pinned-list" aria-label="Pinned storms"></ol>
+    <h3 class="side-sub">Recently ended</h3>
+    <ol class="slist mini" id="recent-list" aria-label="Recently ended storms"></ol>
+  </aside>
+
+  <!-- ============ CENTRE: STAGE ============ -->
+  <section class="stage" aria-label="Main view">
+    <div class="stage-tabs" role="tablist" aria-label="Views">
+      <button role="tab" data-stage="globe" aria-selected="true"><span>1</span>Globe</button>
+      <button role="tab" data-stage="flow" aria-selected="false"><span>2</span>3D flow</button>
+      <button role="tab" data-stage="map" aria-selected="false"><span>3</span>Track map</button>
+      <button role="tab" data-stage="compare" aria-selected="false"><span>4</span>Compare</button>
+      <button role="tab" data-stage="impact" aria-selected="false"><span>5</span>Impact</button>
+    </div>
+    <div class="pane" id="pane-globe">
+      <canvas id="earth-canvas" role="img" aria-label="3D Earth with active tropical cyclones"></canvas>
+      <div id="earth-labels" class="earth-labels"></div>
+      <div class="pane-tools">
+        <button type="button" id="e-in" class="tb" aria-label="Zoom in">+</button>
+        <button type="button" id="e-out" class="tb" aria-label="Zoom out">−</button>
+        <button type="button" id="e-spin" class="tb wide" aria-pressed="false">Spin</button>
+        <button type="button" id="e-reset" class="tb wide">Reset view</button>
+      </div>
+      <p class="pane-note" id="globe-note">Drag to turn and tilt. Select a storm to open it.</p>
+    </div>
+    <div class="pane" id="pane-flow" hidden>
+      <video id="v-video" muted playsinline preload="metadata"></video>
+      <p class="pane-note" id="flow-note"></p>
+    </div>
+    <div class="pane" id="pane-map" hidden>
+      <svg id="map" role="img" aria-label="Regional map of the storm track"></svg>
+      <div class="pane-tools"><button type="button" id="m-in" class="tb" aria-label="Zoom in">+</button><button type="button" id="m-out" class="tb" aria-label="Zoom out">−</button></div>
+    </div>
+    <div class="pane cmp" id="pane-compare" hidden>
+      <div class="cmp-bar">
+        <label>Left <select id="cmp-a"></select></label>
+        <label>Right <select id="cmp-b"></select></label>
+        <button type="button" id="cmp-play" class="tb wide">▶ Play both</button>
+      </div>
+      <div class="cmp-grid">
+        <figure><video id="cmp-va" muted playsinline preload="metadata"></video><figcaption id="cmp-ia"></figcaption><div class="mini" id="cmp-ca"></div></figure>
+        <figure><video id="cmp-vb" muted playsinline preload="metadata"></video><figcaption id="cmp-ib"></figcaption><div class="mini" id="cmp-cb"></div></figure>
+      </div>
+      <input type="range" id="cmp-range" min="0" max="1000" value="0" aria-label="Position in both videos">
+    </div>
+    <div class="pane" id="pane-impact" hidden>
+      <canvas id="imp-canvas" role="img" aria-label="Map of the modelled wind footprint, population, vulnerability and risk"></canvas>
+      <div class="imp-layers" role="group" aria-label="Impact layers">
+        <button type="button" class="tb wide" data-layer="wind" aria-pressed="true">Wind footprint</button>
+        <button type="button" class="tb wide" data-layer="pop" aria-pressed="false">Population</button>
+        <button type="button" class="tb wide" data-layer="vuln" aria-pressed="false">Vulnerability</button>
+        <button type="button" class="tb wide" data-layer="risk" aria-pressed="false">Risk index</button>
+      </div>
+      <div class="imp-legend" id="imp-legend"></div>
+      <p class="imp-tip" id="imp-tip" aria-live="polite"></p>
+      <p class="imp-warn">Research estimate from a wind-only model. Not a warning or a damage assessment: follow your national meteorological service.</p>
+    </div>
+    <ol class="legend" aria-label="Intensity colours">
+      <li><i style="--c:var(--td)"></i>TD</li><li><i style="--c:var(--ts)"></i>TS</li><li><i style="--c:var(--c1)"></i>1</li><li><i style="--c:var(--c2)"></i>2</li>
+      <li><i style="--c:var(--c3)"></i>3</li><li><i style="--c:var(--c4)"></i>4</li><li><i style="--c:var(--c5)"></i>5</li>
+    </ol>
+  </section>
+
+  <!-- ============ BOTTOM: SHARED TIMELINE ============ -->
+  <section class="tl" aria-label="Timeline">
+    <div class="tl-bar">
+      <button type="button" id="t-play" class="tb" aria-label="Play">▶</button>
+      <button type="button" id="t-back" class="tb" aria-label="Back one hour">−1 h</button>
+      <button type="button" id="t-fwd" class="tb" aria-label="Forward one hour">+1 h</button>
+      <label class="small muted">Speed <select id="t-speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+      <strong id="t-time" class="t-time">—</strong>
+      <span id="t-note" class="small muted"></span>
+      <button type="button" id="t-latest" class="tb wide">Latest</button>
+    </div>
+    <div id="timeline" class="timeline"></div>
+  </section>
+
+  <!-- ============ RIGHT: INSPECTOR ============ -->
+  <aside class="insp" aria-label="Storm details">
+    <div class="i-head">
+      <div>
+        <p class="kicker" id="i-kicker"></p>
+        <h2 id="i-name">—</h2>
+      </div>
+      <button type="button" id="pin" class="tb wide" aria-pressed="false">☆ Pin</button>
+    </div>
+    <div class="tags" id="i-tags"></div>
+    <div class="metrics" id="metrics"></div>
+    <div class="checks-box">
+      <p class="checks-title" id="checks-title">Conditions at this hour</p>
+      <ul class="checks" id="checks"></ul>
+      <p class="small muted">Indicative thresholds often used in rapid-intensification studies. Not a forecast.</p>
+    </div>
+    <div class="imp-box" id="imp-box" hidden>
+      <p class="checks-title">Exposure (indicative) <button type="button" class="linkish small" data-open="method">method</button></p>
+      <div class="imp-nums">
+        <div><span>People in winds ≥ 34 kt</span><b id="imp-34">—</b></div>
+        <div><span>People in winds ≥ 64 kt</span><b id="imp-64">—</b></div>
+      </div>
+      <ul class="imp-countries" id="imp-countries"></ul>
+      <p class="small muted" id="imp-note">Up to the timeline's hour, from the modelled wind footprint and GHSL population.</p>
+    </div>
+    <div class="i-tabs" role="tablist" aria-label="More about this storm">
+      <button role="tab" data-itab="summary" aria-selected="true">Summary</button>
+      <button role="tab" data-itab="files" aria-selected="false">Files and links</button>
+    </div>
+    <div class="i-pane" id="itab-summary"></div>
+    <div class="i-pane" id="itab-files" hidden></div>
+  </aside>
+</div>
+
+<!-- ============ DRAWERS ============ -->
+<dialog id="dlg" class="drawer" aria-labelledby="dlg-title">
+  <div class="d-head"><h2 id="dlg-title"></h2><form method="dialog"><button class="tb wide" aria-label="Close">Close</button></form></div>
+  <div class="d-body" id="d-season" hidden>
+    <div class="d-grid">
+      <div class="card"><h3>Accumulated cyclone energy by basin</h3><div id="s-ace"></div></div>
+      <div class="card"><h3>Storms by peak intensity</h3><div id="s-cat"></div></div>
+      <div class="card"><h3>Strongest storms</h3><ol id="s-top" class="toplist"></ol></div>
+    </div>
+  </div>
+  <div class="d-body" id="d-archive" hidden>
+    <div class="arch-bar">
+      <label>Year <select id="f-year"><option value="">All</option></select></label>
+      <label>Basin <select id="f-basin"><option value="">All</option></select></label>
+      <label>Sort <select id="f-sort"><option value="date">Most recent</option><option value="peak">Strongest</option><option value="ace">Highest ACE</option></select></label>
+    </div>
+    <div id="archive-list" class="gallery"></div>
+  </div>
+  <div class="d-body" id="d-guide" hidden>
+    <div class="guide-frame" id="guide-frame"><img id="guide-img" alt="A frame from one of the storm videos"></div>
+    <div class="card" id="guide-text"></div>
+    <h3>Keyboard</h3>
+    <p class="small">Space play or pause · ← → one hour · [ ] previous or next storm · 1–4 switch view · Ctrl K search</p>
+  </div>
+  <div class="d-body" id="d-method" hidden>
+    <div class="method">
+      <p>To model and estimate the spatial patterns of cyclone vulnerability and resulting damage, we integrate cyclone hazard dynamics,
+        exposure (population and economic wealth) and social vulnerability into a unified spatial framework.</p>
+      <h3>1. Data integration</h3>
+      <p>All variables are mapped onto a standardised two-dimensional grid of 0.1° cells with coordinates (x, y), cut out around each storm's track.</p>
+      <h3>2. Hazard H(x, y)</h3>
+      <p>The wind field follows the Holland (1980) profile, V(r) = V<sub>max</sub> · [ (R<sub>max</sub>/r)<sup>B</sup> · exp(1 − (R<sub>max</sub>/r)<sup>B</sup>) ]<sup>½</sup>,
+        driven hour by hour by the official track and intensity (NCEP TCVitals). The shape parameter B = ρ e V<sub>max</sub><sup>2</sup> / Δp (limited to 1–2.5) uses the
+        pressure deficit Δp between the environment and the centre; the radius of maximum wind R<sub>max</sub> comes from TCVitals (Willoughby et al. 2006 when missing).
+        0.55 × the storm's forward motion is added for the asymmetry. The footprint is the highest wind each cell experiences along the track.</p>
+      <h3>3. Exposure E(x, y)</h3>
+      <p>Population from GHSL GHS-POP 2025 (EU JRC), summed into each cell. Economic value = population × national GDP per capita (PPP, World Bank),
+        the population-weighted form of LitPop (Eberenz et al. 2020). In the risk index, E = min(1, log<sub>10</sub>(1 + people) / 4.5).</p>
+      <h3>4. Vulnerability V(x, y)</h3>
+      <p>A country-level index (0 = least, 1 = most vulnerable): the mean of scaled GDP per capita (PPP), under-5 mortality and lack of access to electricity
+        (World Bank). This first version is deliberately simple and coarse; a gridded deprivation index (GRDI, NASA SEDAC) can replace it.</p>
+      <h3>5. Damage and risk</h3>
+      <p>Mean damage ratio f(V) = v<sup>3</sup> / (1 + v<sup>3</sup>), v = max(V − 25.7, 0) / (74.7 − 25.7) with V in m/s (Emanuel 2011, CLIMADA default thresholds).
+        Risk index R(x, y) = 100 · f(H) · E · V, shown in five classes from very low (&lt; 1) to very high (&gt; 20). It is a relative index: no money damage is estimated.</p>
+      <h3>Limitations</h3>
+      <ul>
+        <li>Wind only. Storm surge and rainfall flooding, which cause most deaths in the Bay of Bengal, are not modelled.</li>
+        <li>The damage curve is not calibrated for each region, so the index compares places and storms rather than predicting losses.</li>
+        <li>Vulnerability is national, so differences within a country are not captured.</li>
+        <li>Population is a 2025 estimate; official intensities have their own uncertainty.</li>
+      </ul>
+      <p class="small muted">For comparison, the Global Disaster Alert and Coordination System (GDACS) publishes exposed-population estimates for every storm.</p>
+    </div>
+  </div>
+  <div class="d-body" id="d-about" hidden>
+    <p class="about-name" id="about-name"></p>
+    <p class="about-role" id="about-role"></p>
+    <p id="about-summary"></p>
+    <p class="links" id="about-links"></p>
+    <div class="d-grid">
+      <div><h3>Research interests</h3><ul id="about-interests"></ul></div>
+      <div><h3>What this site demonstrates</h3><ul id="about-skills"></ul></div>
+      <div><h3>Memberships</h3><ul id="about-members"></ul></div>
+    </div>
+    <p class="small muted" id="site-stats"></p>
+    <p class="small muted">Data: NCEP GFS 0.25° analyses and NCEP TCVitals (operational positions and intensities from NHC, CPHC, JTWC and other centres). Population: GHSL GHS-POP 2025 (EU JRC). Economic and vulnerability indicators: World Bank. Earth imagery: NASA Blue Marble and Black Marble. Coastlines: Natural Earth. Rendering: three.js and d3. Research visualisation, not an official forecast.</p>
+    <p class="small muted" id="generated"></p>
+  </div>
+</dialog>
+
+<noscript><p class="banner">This dashboard needs JavaScript.</p></noscript>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="config.js?v=__BUILD__"></script>
+<script src="earth.js?v=__BUILD__"></script>
+<script src="app.js?v=__BUILD__"></script>
+</body>
+</html>
